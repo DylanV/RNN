@@ -1,0 +1,19 @@
+name: nn
+channels:
+- pytorch
+- conda-forge
+- defaults
+dependencies:
+- python>=3.6
+- pytorch>=0.4
+- cuda92
+- numpy
+- scikit-learn
+- matplotlib
+- seaborn
+- jupyter
+- pytest
+- tqdm
+- pip:
+        - torchvision
+
