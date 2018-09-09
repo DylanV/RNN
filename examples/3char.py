@@ -1,0 +1,111 @@
+
+import os
+from pathlib import Path
+
+import numpy as np
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+
+data_dir = Path(os.getcwd()) / '..' / 'data' / 'wikitext-2-raw'
+train_path = data_dir / 'wiki.test.raw'
+
+text = open(train_path, encoding='utf8').read()
+
+
+class Char3Dataset(Dataset):
+
+    def __init__(self, text):
+        chars = list(sorted(set(text)))
+        chars.insert(0, "\0")
+
+        self.vocab_size = len(chars)
+
+        self.char2idx = {char: idx for idx, char in enumerate(chars)}
+        self.idx2char = {idx: char for idx, char in enumerate(chars)}
+
+        idx_text = [self.char2idx[char] for char in text]
+
+        cs = 3
+        self.c1 = torch.as_tensor([idx_text[i] for i in range(0, len(idx_text) - cs, cs)])
+        self.c2 = torch.as_tensor([idx_text[i + 1] for i in range(0, len(idx_text) - cs, cs)])
+        self.c3 = torch.as_tensor([idx_text[i + 2] for i in range(0, len(idx_text) - cs, cs)])
+        self.c4 = torch.as_tensor([idx_text[i + 3] for i in range(0, len(idx_text) - cs, cs)])
+
+    def __len__(self):
+        return self.c1.shape[0]
+
+    def __getitem__(self, item):
+        return self.c1[item], self.c2[item], self.c3[item], self.c4[item]
+
+
+class Char3Model(nn.Module):
+
+    def __init__(self, vocab_size):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, 42)
+
+        self.input_fc = nn.Linear(42, 256)
+
+        self.hidden_fc = nn.Linear(256, 256)
+        self.activation = nn.Tanh()
+
+        self.out_fc = nn.Linear(256, vocab_size)
+
+    def forward(self, c1, c2, c3):
+        in1 = F.relu(self.input_fc(self.embedding(c1)))
+        in2 = F.relu(self.input_fc(self.embedding(c2)))
+        in3 = F.relu(self.input_fc(self.embedding(c3)))
+
+        h = torch.autograd.Variable(torch.zeros(in1.size()).cuda())
+        # h = torch.autograd.Variable(torch.zeros(in1.size()))
+        h = self.activation(self.hidden_fc(h+in1))
+        h = self.activation(self.hidden_fc(h+in2))
+        h = self.activation(self.hidden_fc(h+in3))
+
+        return self.out_fc(h)
+
+def get_next(txt, dataset, model):
+    c = torch.as_tensor([dataset.char2idx[char] for char in txt]).cuda()
+    pred = model(*c[:3])
+    i = np.argmax(pred.to('cpu').detach().numpy())
+    return dataset.idx2char[i]
+
+dataset = Char3Dataset(text)
+dataloader = DataLoader(dataset, batch_size=100, shuffle=True)
+model = Char3Model(dataset.vocab_size)
+model.cuda()
+
+learning_rate = 1e-3
+decay = 1e-5
+loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
+
+num_epochs = 1
+for epoch in range(num_epochs):
+    curr_loss = 0
+    model.train()
+    model.cuda()
+    for i_batch, batch in enumerate(dataloader):
+        c1, c2, c3, c4 = batch
+        c1, c2, c3, c4 = c1.cuda(), c2.cuda(), c3.cuda(), c4.cuda()
+        pred = model(c1, c2, c3)
+        loss = loss_fn(pred, c4)
+        curr_loss = 0.99 * curr_loss + 0.01 * loss if curr_loss != 0 else loss
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    print(curr_loss)
+
+    model.eval()
+    txt = 'and'
+    for i in range(100):
+        txt += get_next(txt[-3:], dataset, model)
+    print(txt)
+
+print(get_next('hel', dataset, model))
+print(get_next(' th', dataset, model))
+print(get_next('and', dataset, model))
+
