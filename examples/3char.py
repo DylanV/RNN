@@ -22,6 +22,7 @@ class Char3Dataset(Dataset):
         chars.insert(0, "\0")
 
         self.vocab_size = len(chars)
+        print(self.vocab_size)
 
         self.char2idx = {char: idx for idx, char in enumerate(chars)}
         self.idx2char = {idx: char for idx, char in enumerate(chars)}
@@ -46,30 +47,37 @@ class Char3Model(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, 42)
+        self.hidden_dim = 256
 
         self.input_fc = nn.Linear(42, 256)
+        self.in_activation = nn.ReLU(inplace=True)
 
         self.hidden_fc = nn.Linear(256, 256)
         self.activation = nn.Tanh()
 
         self.out_fc = nn.Linear(256, vocab_size)
 
-    def forward(self, c1, c2, c3):
-        in1 = F.relu(self.input_fc(self.embedding(c1)))
-        in2 = F.relu(self.input_fc(self.embedding(c2)))
-        in3 = F.relu(self.input_fc(self.embedding(c3)))
+    def forward(self, *seq):
+        # in1 = F.relu(self.input_fc(self.embedding(c1)))
+        # in2 = F.relu(self.input_fc(self.embedding(c2)))
+        # in3 = F.relu(self.input_fc(self.embedding(c3)))
 
-        h = torch.autograd.Variable(torch.zeros(in1.size()).cuda())
         # h = torch.autograd.Variable(torch.zeros(in1.size()))
-        h = self.activation(self.hidden_fc(h+in1))
-        h = self.activation(self.hidden_fc(h+in2))
-        h = self.activation(self.hidden_fc(h+in3))
+        # h = self.activation(self.hidden_fc(h+in1))
+        # h = self.activation(self.hidden_fc(h+in2))
+        # h = self.activation(self.hidden_fc(h+in3))
+
+        h = torch.autograd.Variable(torch.zeros(self.hidden_dim).cuda())
+        for x in seq:
+            input = self.in_activation(self.input_fc(self.embedding(x)))
+            h = self.activation(self.hidden_fc(h+input))
 
         return self.out_fc(h)
 
 def get_next(txt, dataset, model):
     c = torch.as_tensor([dataset.char2idx[char] for char in txt]).cuda()
-    pred = model(*c[:3])
+    c1, c2, c3 = c
+    pred = model(c1, c2, c3)
     i = np.argmax(pred.to('cpu').detach().numpy())
     return dataset.idx2char[i]
 
@@ -82,6 +90,8 @@ learning_rate = 1e-3
 decay = 1e-5
 loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
+
+print(get_next('hel', dataset, model))
 
 num_epochs = 1
 for epoch in range(num_epochs):
