@@ -46,6 +46,7 @@ class Char3Model(nn.Module):
 
     def __init__(self, vocab_size):
         super().__init__()
+        self.vocab_size = vocab_size
         self.embedding = nn.Embedding(vocab_size, 42)
         self.hidden_dim = 256
 
@@ -56,6 +57,7 @@ class Char3Model(nn.Module):
         self.activation = nn.Tanh()
 
         self.out_fc = nn.Linear(256, vocab_size)
+        self.out_activation = nn.LogSoftmax(dim=0)
 
     def forward(self, *seq):
         # in1 = F.relu(self.input_fc(self.embedding(c1)))
@@ -72,13 +74,22 @@ class Char3Model(nn.Module):
             input = self.in_activation(self.input_fc(self.embedding(x)))
             h = self.activation(self.hidden_fc(h+input))
 
-        return self.out_fc(h)
+        return self.out_activation(self.out_fc(h))
 
 def get_next(txt, dataset, model):
     c = torch.as_tensor([dataset.char2idx[char] for char in txt]).cuda()
     c1, c2, c3 = c
     pred = model(c1, c2, c3)
+    p = np.exp(pred.to('cpu').detach().numpy())
+    i = np.random.choice(model.vocab_size, p=p)
+    return dataset.idx2char[i]
+
+def get_max_next(txt, dataset, model):
+    c = torch.as_tensor([dataset.char2idx[char] for char in txt]).cuda()
+    c1, c2, c3 = c
+    pred = model(c1, c2, c3)
     i = np.argmax(pred.to('cpu').detach().numpy())
+    # i = np.random.choice(model.vocab_size, p=p)
     return dataset.idx2char[i]
 
 dataset = Char3Dataset(text)
@@ -88,31 +99,43 @@ model.cuda()
 
 learning_rate = 1e-3
 decay = 1e-5
-loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
+# loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
+loss_fn = torch.nn.NLLLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
 
-print(get_next('hel', dataset, model))
+# print(get_next('hel', dataset, model))
+import matplotlib.pyplot as plt
 
-num_epochs = 1
+num_epochs = 50
+losses = []
 for epoch in range(num_epochs):
     curr_loss = 0
     model.train()
     model.cuda()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
     for i_batch, batch in enumerate(dataloader):
         c1, c2, c3, c4 = batch
         c1, c2, c3, c4 = c1.cuda(), c2.cuda(), c3.cuda(), c4.cuda()
         pred = model(c1, c2, c3)
         loss = loss_fn(pred, c4)
         curr_loss = 0.99 * curr_loss + 0.01 * loss if curr_loss != 0 else loss
+        losses.append(curr_loss)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    print(curr_loss)
+    # plt.plot(losses)
+    # plt.show()
+    print(curr_loss.item())
 
     model.eval()
     txt = 'and'
     for i in range(100):
         txt += get_next(txt[-3:], dataset, model)
+    print(txt)
+    print()
+    txt = 'and'
+    for i in range(100):
+        txt += get_max_next(txt[-3:], dataset, model)
     print(txt)
 
 print(get_next('hel', dataset, model))
