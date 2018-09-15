@@ -93,26 +93,25 @@ def get_max_next(txt, dataset, model):
     return dataset.idx2char[i]
 
 dataset = Char3Dataset(text)
-dataloader = DataLoader(dataset, batch_size=100, shuffle=True)
+dataloader = DataLoader(dataset, batch_size=1000, shuffle=True)
 model = Char3Model(dataset.vocab_size)
 model.cuda()
 
-learning_rate = 1e-3
-decay = 1e-5
-# loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
+learning_rate = 5e-3
+decay = 1e-6
+num_epochs = 100
 loss_fn = torch.nn.NLLLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
+lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
 
-# print(get_next('hel', dataset, model))
 import matplotlib.pyplot as plt
 
-num_epochs = 50
+clip = 5
 losses = []
 for epoch in range(num_epochs):
     curr_loss = 0
     model.train()
     model.cuda()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
     for i_batch, batch in enumerate(dataloader):
         c1, c2, c3, c4 = batch
         c1, c2, c3, c4 = c1.cuda(), c2.cuda(), c3.cuda(), c4.cuda()
@@ -124,22 +123,14 @@ for epoch in range(num_epochs):
         nn.utils.clip_grad_norm_(model.parameters(), clip)
         loss.backward()
         optimizer.step()
-    # plt.plot(losses)
-    # plt.show()
+    lr_scheduler.step(epoch)
     print(curr_loss.item())
 
     model.eval()
     txt = 'and'
-    for i in range(100):
+    for i in range(500):
         txt += get_next(txt[-3:], dataset, model)
     print(txt)
     print()
-    txt = 'and'
-    for i in range(100):
-        txt += get_max_next(txt[-3:], dataset, model)
-    print(txt)
-
-print(get_next('hel', dataset, model))
-print(get_next(' th', dataset, model))
-print(get_next('and', dataset, model))
-
+plt.plot(losses)
+plt.show()
