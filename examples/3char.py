@@ -57,7 +57,7 @@ class Char3Model(nn.Module):
         self.activation = nn.Tanh()
 
         self.out_fc = nn.Linear(256, vocab_size)
-        self.out_activation = nn.LogSoftmax(dim=0)
+        self.out_activation = nn.LogSoftmax(dim=-1)
 
     def forward(self, *seq):
         # in1 = F.relu(self.input_fc(self.embedding(c1)))
@@ -121,6 +121,7 @@ for epoch in range(num_epochs):
         curr_loss = 0.99 * curr_loss + 0.01 * loss if curr_loss != 0 else loss
         losses.append(curr_loss)
         optimizer.zero_grad()
+        nn.utils.clip_grad_norm_(model.parameters(), clip)
         loss.backward()
         optimizer.step()
     # plt.plot(losses)
