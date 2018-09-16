@@ -1,6 +1,7 @@
 
 import os
 from pathlib import Path
+import time
 
 import numpy as np
 
@@ -13,6 +14,7 @@ data_dir = Path(os.getcwd()) / '..' / 'data' / 'wikitext-2-raw'
 train_path = data_dir / 'wiki.test.raw'
 
 text = open(train_path, encoding='utf8').read()
+device = 'cuda'
 
 
 class Char3Dataset(Dataset):
@@ -22,7 +24,6 @@ class Char3Dataset(Dataset):
         chars.insert(0, "\0")
 
         self.vocab_size = len(chars)
-        print(self.vocab_size)
 
         self.char2idx = {char: idx for idx, char in enumerate(chars)}
         self.idx2char = {idx: char for idx, char in enumerate(chars)}
@@ -58,6 +59,7 @@ class Char3Model(nn.Module):
 
         self.out_fc = nn.Linear(256, vocab_size)
         self.out_activation = nn.LogSoftmax(dim=-1)
+        self.hidden_state = torch.autograd.Variable(torch.zeros(self.hidden_dim)).to(device)
 
     def forward(self, *seq):
         # in1 = F.relu(self.input_fc(self.embedding(c1)))
@@ -69,15 +71,22 @@ class Char3Model(nn.Module):
         # h = self.activation(self.hidden_fc(h+in2))
         # h = self.activation(self.hidden_fc(h+in3))
 
-        h = torch.autograd.Variable(torch.zeros(self.hidden_dim).cuda())
+        if self.training:
+            h = torch.autograd.Variable(torch.zeros(self.hidden_dim)).to(device)
+        else:
+            h = self.hidden_state
+
         for x in seq:
             input = self.in_activation(self.input_fc(self.embedding(x)))
             h = self.activation(self.hidden_fc(h+input))
 
+        if not self.training:
+            self.hidden_state = h
+
         return self.out_activation(self.out_fc(h))
 
 def get_next(txt, dataset, model):
-    c = torch.as_tensor([dataset.char2idx[char] for char in txt]).cuda()
+    c = torch.as_tensor([dataset.char2idx[char] for char in txt]).to(device)
     c1, c2, c3 = c
     pred = model(c1, c2, c3)
     p = np.exp(pred.to('cpu').detach().numpy())
@@ -95,11 +104,11 @@ def get_max_next(txt, dataset, model):
 dataset = Char3Dataset(text)
 dataloader = DataLoader(dataset, batch_size=1000, shuffle=True)
 model = Char3Model(dataset.vocab_size)
-model.cuda()
+model.to(device)
 
-learning_rate = 5e-3
+learning_rate = 1e-2
 decay = 1e-6
-num_epochs = 100
+num_epochs = 200
 loss_fn = torch.nn.NLLLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
 lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
@@ -111,10 +120,10 @@ losses = []
 for epoch in range(num_epochs):
     curr_loss = 0
     model.train()
-    model.cuda()
+    start = time.time()
     for i_batch, batch in enumerate(dataloader):
         c1, c2, c3, c4 = batch
-        c1, c2, c3, c4 = c1.cuda(), c2.cuda(), c3.cuda(), c4.cuda()
+        c1, c2, c3, c4 = c1.to(device), c2.to(device), c3.to(device), c4.to(device)
         pred = model(c1, c2, c3)
         loss = loss_fn(pred, c4)
         curr_loss = 0.99 * curr_loss + 0.01 * loss if curr_loss != 0 else loss
@@ -124,11 +133,12 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
     lr_scheduler.step(epoch)
-    print(curr_loss.item())
+    duration = time.time() - start
+    print(f'{epoch}, {curr_loss.item():.3f}, {duration:.2f}')
 
     model.eval()
     txt = 'and'
-    for i in range(500):
+    for i in range(300):
         txt += get_next(txt[-3:], dataset, model)
     print(txt)
     print()
