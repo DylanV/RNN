@@ -110,7 +110,7 @@ learning_rate = 1e-2
 decay = 1e-6
 num_epochs = 200
 batch_size = 1000
-seq_len = 10
+seq_len = 30
 grad_clip = 5
 
 dataset = Char3Dataset(text, seq_len)
