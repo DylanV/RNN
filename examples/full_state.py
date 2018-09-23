@@ -31,8 +31,8 @@ class CharDataset(Dataset):
 
         idx_text = [self.char2idx[char] for char in text]
 
-        seqs = [[idx_text[i+j] for i in range(seq_len)] for j in range(len(idx_text) - seq_len)]
-        targets = [idx_text[j + seq_len] for j in range(len(idx_text) - seq_len)]
+        seqs = [[idx_text[i+j] for i in range(seq_len)] for j in range(0, len(idx_text) - seq_len - 1, seq_len)]
+        targets = [[idx_text[i+j] for i in range(seq_len)] for j in range(1, len(idx_text) - seq_len - 1, seq_len)]
 
         self.seqs = torch.as_tensor(seqs)
         self.targets = torch.as_tensor(targets)
@@ -66,12 +66,14 @@ class RNN(nn.Module):
         # Initialise the hidden state with all zeros if no initial state is given
         h = torch.autograd.Variable(torch.zeros(bs, self.hidden_dim)).to(device) if h_init is None else h_init
 
+        hs = []
         # Go through the sequence
         for i in range(seq_len):
             inh = self.in_activation(self.in_2_hidden(sequence[:, i]))
             h = self.hidden_activation(self.hidden_2_hidden(h+inh))
+            hs.append(h)
 
-        return h
+        return hs
 
 
 class CharModel(nn.Module):
@@ -82,11 +84,14 @@ class CharModel(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.rnn = RNN(embed_dim, hidden_dim)
         self.hidden_2_out = nn.Linear(hidden_dim, vocab_size)
-        self.out = nn.LogSoftmax(dim=1)
+        self.out = nn.LogSoftmax(dim=-1)
 
     def forward(self, sequence, h=None):
-        hidden_state = self.rnn(self.embedding(sequence), h)
-        return self.out(self.hidden_2_out(hidden_state)), hidden_state
+        hidden_states = self.rnn(self.embedding(sequence), h)
+        outs = []
+        for h in hidden_states:
+            outs.append(self.out(self.hidden_2_out(h)))
+        return outs, hidden_states
 
 
 def get_next(start_char, dataset, model, length):
@@ -97,6 +102,7 @@ def get_next(start_char, dataset, model, length):
     for _ in range(length):
         char_seq = torch.as_tensor([dataset.char2idx[txt[-1]]]).to(device).view(1, -1)
         pred, h = model(char_seq, h)
+        pred, h = pred[0], h[0]
         probs = np.exp(pred.detach().to('cpu').numpy())[0]
         i = np.random.choice(model.vocab_size, p=probs)
         txt += dataset.idx2char[i]
@@ -107,8 +113,8 @@ def get_next(start_char, dataset, model, length):
 learning_rate = 1e-2
 decay = 1e-6
 num_epochs = 200
-batch_size = 1000
-seq_len = 30
+batch_size = 100
+seq_len = 50
 grad_clip = 5
 
 dataset = CharDataset(text, seq_len)
@@ -131,8 +137,12 @@ for epoch in range(num_epochs):
         seq, target = batch
         seq, target = seq.to(device), target.to(device)
         pred, _ = model(seq)
-        loss = loss_fn(pred, target)
+        loss = torch.as_tensor([0.0]).to(device)
+        for i, p in enumerate(pred):
+            loss += loss_fn(p, target[:, i])
+        loss /= seq_len
         curr_loss = 0.9 * curr_loss + 0.1 * loss if curr_loss != 0 else loss
+        nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         losses.append(curr_loss)
         optimizer.zero_grad()
         loss.backward()
@@ -146,4 +156,3 @@ for epoch in range(num_epochs):
     print()
 plt.plot(losses)
 plt.show()
-
